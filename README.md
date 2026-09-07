@@ -39,7 +39,7 @@ xcode-select --install
 在项目根目录执行：
 
 ```bash
-./scripts/build.sh
+zsh scripts/build.sh
 ```
 
 构建完成后，应用位于：
@@ -155,7 +155,7 @@ build/
 .DS_Store
 ```
 
-接收者解压后运行 `./scripts/build.sh` 即可在自己的电脑上重新构建和修改。若通过 Git 分享，项目内的 `.gitignore` 已排除这些本地文件。
+接收者解压后运行 `zsh scripts/build.sh` 即可在自己的电脑上重新构建和修改。若通过 Git 分享，项目内的 `.gitignore` 已排除这些本地文件。
 
 ## 版本号
 
