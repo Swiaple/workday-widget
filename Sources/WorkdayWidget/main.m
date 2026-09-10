@@ -140,17 +140,104 @@
 }
 @end
 
+@interface WorkWidgetButton : NSButton @end
+@implementation WorkWidgetButton
+- (BOOL)acceptsFirstMouse:(NSEvent *)event { return YES; }
+@end
+
 @interface WorkProgressView : NSView
 @property (nonatomic) CGFloat regularProgress;
 @property (nonatomic) CGFloat overtimeProgress;
 @property (nonatomic) BOOL hasRecord;
+@property (nonatomic) BOOL progressIconVisible;
+@property (nonatomic) BOOL usesCustomProgressIcon;
+@property (nonatomic, strong, readonly) NSImageView *progressIconView;
 @end
 
 @implementation WorkProgressView
+- (instancetype)initWithFrame:(NSRect)frameRect {
+    self = [super initWithFrame:frameRect];
+    if (!self) return nil;
+
+    // Kept separate from the clock-out button. NSImageView's animation support
+    // lets an original GIF/APNG/WebP remain animated instead of being flattened.
+    _progressIconView = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, 22, 22)];
+    _progressIconView.imageScaling = NSImageScaleProportionallyUpOrDown;
+    _progressIconView.animates = YES;
+    _progressIconView.hidden = YES;
+    _progressIconView.wantsLayer = YES;
+    _progressIconView.layer.cornerRadius = 11;
+    _progressIconView.layer.shadowColor = NSColor.blackColor.CGColor;
+    _progressIconView.layer.shadowOpacity = 0.22;
+    _progressIconView.layer.shadowRadius = 2.0;
+    _progressIconView.layer.shadowOffset = NSMakeSize(0, -1);
+    [_progressIconView setAccessibilityLabel:@"工时进度图标"];
+    [self addSubview:_progressIconView];
+    return self;
+}
 - (BOOL)isOpaque { return NO; }
+- (NSRect)trackRect {
+    CGFloat height = MIN(7.0, MAX(1.0, NSHeight(self.bounds) - 1.0));
+    return NSMakeRect(0.5, floor((NSHeight(self.bounds) - height) / 2.0) + 0.5,
+                      MAX(0, NSWidth(self.bounds) - 1.0), height);
+}
+- (void)setRegularProgress:(CGFloat)value {
+    _regularProgress = MIN(1.0, MAX(0.0, value));
+    [self setNeedsDisplay:YES];
+    [self setNeedsLayout:YES];
+}
+- (void)setOvertimeProgress:(CGFloat)value {
+    _overtimeProgress = MIN(1.0, MAX(0.0, value));
+    [self updateProgressIconAppearance];
+    [self setNeedsDisplay:YES];
+    [self setNeedsLayout:YES];
+}
+- (void)setProgressIconVisible:(BOOL)value {
+    _progressIconVisible = value;
+    self.progressIconView.hidden = !value;
+    [self setNeedsLayout:YES];
+}
+- (void)setUsesCustomProgressIcon:(BOOL)value {
+    _usesCustomProgressIcon = value;
+    [self updateProgressIconAppearance];
+}
+- (void)updateProgressIconAppearance {
+    if (!self.progressIconView) return;
+    if (self.usesCustomProgressIcon) {
+        self.progressIconView.layer.backgroundColor = NSColor.clearColor.CGColor;
+        self.progressIconView.layer.borderWidth = 0;
+        return;
+    }
+    self.progressIconView.layer.borderWidth = 0.7;
+    self.progressIconView.layer.borderColor = [NSColor.whiteColor colorWithAlphaComponent:0.30].CGColor;
+    if (self.overtimeProgress > 0) {
+        CGFloat strength = 0.52 + self.overtimeProgress * 0.48;
+        self.progressIconView.layer.backgroundColor =
+            [NSColor.systemRedColor colorWithAlphaComponent:strength].CGColor;
+    } else {
+        self.progressIconView.layer.backgroundColor =
+            [NSColor.systemGreenColor colorWithAlphaComponent:0.94].CGColor;
+    }
+}
+- (void)layout {
+    [super layout];
+    NSRect track = [self trackRect];
+    CGFloat regularEnd = NSWidth(track) * 0.82;
+    CGFloat markerX = NSMinX(track);
+    if (self.overtimeProgress > 0) {
+        markerX += regularEnd + (NSWidth(track) - regularEnd) * self.overtimeProgress;
+    } else {
+        markerX += regularEnd * self.regularProgress;
+    }
+    CGFloat size = 22.0;
+    markerX = MIN(NSWidth(self.bounds) - size / 2.0, MAX(size / 2.0, markerX));
+    self.progressIconView.frame = NSMakeRect(round(markerX - size / 2.0),
+                                             round(NSMidY(self.bounds) - size / 2.0),
+                                             size, size);
+}
 - (void)drawRect:(NSRect)dirtyRect {
     [super drawRect:dirtyRect];
-    NSRect track = NSInsetRect(self.bounds, 0.5, 0.5);
+    NSRect track = [self trackRect];
     CGFloat radius = NSHeight(track) / 2.0;
     [[NSColor.whiteColor colorWithAlphaComponent:0.14] setFill];
     [[NSBezierPath bezierPathWithRoundedRect:track xRadius:radius yRadius:radius] fill];
@@ -194,6 +281,7 @@
 @property (nonatomic, strong) NSTextField *hintLabel;
 @property (nonatomic, strong) NSView *statusDot;
 @property (nonatomic, strong) WorkProgressView *progressView;
+@property (nonatomic, strong) WorkWidgetButton *clockOutButton;
 @property (nonatomic, strong) NSVisualEffectView *backgroundEffectView;
 @property (nonatomic, strong) NSImageView *backgroundImageView;
 @property (nonatomic, strong) NSView *backgroundTintView;
@@ -203,7 +291,11 @@
 @property (nonatomic, strong) NSTextField *settingsHoursField;
 @property (nonatomic, strong) NSTextField *settingsMinutesField;
 @property (nonatomic, strong) NSButton *settingsRemoveButton;
+@property (nonatomic, strong) NSSegmentedControl *settingsIconModeControl;
+@property (nonatomic, strong) NSButton *settingsChooseIconButton;
+@property (nonatomic, strong) NSImageView *settingsIconPreview;
 @property (nonatomic, strong) NSImage *pendingSettingsImage;
+@property (nonatomic, strong) NSData *pendingSettingsIconData;
 @property (nonatomic) BOOL pendingRemoveBackground;
 @property (nonatomic, strong) NSTimer *refreshTimer;
 @end
@@ -304,8 +396,22 @@
     self.rangeLabel.lineBreakMode = NSLineBreakByTruncatingTail;
     self.rangeLabel.translatesAutoresizingMaskIntoConstraints = NO;
 
-    self.progressView = [[WorkProgressView alloc] init];
+    self.progressView = [[WorkProgressView alloc] initWithFrame:NSZeroRect];
     self.progressView.translatesAutoresizingMaskIntoConstraints = NO;
+
+    self.clockOutButton = [[WorkWidgetButton alloc] initWithFrame:NSZeroRect];
+    self.clockOutButton.bordered = NO;
+    self.clockOutButton.buttonType = NSButtonTypeMomentaryPushIn;
+    self.clockOutButton.title = @"下班";
+    self.clockOutButton.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
+    self.clockOutButton.target = self;
+    self.clockOutButton.action = @selector(clockOutNow:);
+    self.clockOutButton.toolTip = @"一键按当前时间记录下班";
+    self.clockOutButton.wantsLayer = YES;
+    self.clockOutButton.layer.cornerRadius = 10;
+    self.clockOutButton.layer.borderWidth = 0.7;
+    self.clockOutButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.clockOutButton setAccessibilityLabel:@"一键下班"];
 
     NSButton *historyButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"calendar" accessibilityDescription:@"工作记录"]
                                                   target:self action:@selector(showHistory:)];
@@ -315,7 +421,8 @@
     historyButton.translatesAutoresizingMaskIntoConstraints = NO;
 
     [root addSubview:self.statusDot]; [root addSubview:self.hintLabel];
-    [root addSubview:self.rangeLabel]; [root addSubview:historyButton]; [root addSubview:self.progressView];
+    [root addSubview:self.rangeLabel]; [root addSubview:historyButton];
+    [root addSubview:self.progressView]; [root addSubview:self.clockOutButton];
     [NSLayoutConstraint activateConstraints:@[
         [self.statusDot.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:15],
         [self.statusDot.centerYAnchor constraintEqualToAnchor:self.rangeLabel.centerYAnchor],
@@ -331,10 +438,16 @@
         [historyButton.widthAnchor constraintEqualToConstant:24],
         [historyButton.heightAnchor constraintEqualToConstant:24],
         [self.progressView.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:15],
-        [self.progressView.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-15],
-        [self.progressView.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-12],
-        [self.progressView.heightAnchor constraintEqualToConstant:7]
+        [self.progressView.trailingAnchor constraintEqualToAnchor:self.clockOutButton.leadingAnchor constant:-8],
+        [self.progressView.bottomAnchor constraintEqualToAnchor:root.bottomAnchor constant:-4],
+        [self.progressView.heightAnchor constraintEqualToConstant:24],
+        [self.clockOutButton.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-15],
+        [self.clockOutButton.centerYAnchor constraintEqualToAnchor:self.progressView.centerYAnchor],
+        [self.clockOutButton.widthAnchor constraintEqualToConstant:42],
+        [self.clockOutButton.heightAnchor constraintEqualToConstant:22]
     ]];
+
+    [self applyProgressIcon];
 
     BOOL restored = [self restoreWidgetPlacementWithSize:size];
     if (!restored) {
@@ -371,6 +484,44 @@
     } else {
         self.backgroundTintView.layer.backgroundColor = NSColor.clearColor.CGColor;
     }
+}
+
+- (void)applyProgressIcon {
+    self.progressView.usesCustomProgressIcon = self.settings.progressIconMode == WidgetProgressIconModeCustom;
+    if (self.settings.progressIconMode == WidgetProgressIconModeBuiltIn) {
+        NSImage *image = [NSImage imageWithSystemSymbolName:@"figure.run"
+                                  accessibilityDescription:@"奔跑的小人"];
+        NSImageSymbolConfiguration *configuration =
+            [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightSemibold];
+        self.progressView.progressIconView.image = [image imageWithSymbolConfiguration:configuration];
+        self.progressView.progressIconView.contentTintColor = NSColor.whiteColor;
+    } else if (self.settings.progressIconMode == WidgetProgressIconModeCustom) {
+        self.progressView.progressIconView.image = self.settings.customProgressIconImage;
+        self.progressView.progressIconView.contentTintColor = nil;
+    } else {
+        self.progressView.progressIconView.image = nil;
+    }
+}
+
+- (void)updateClockOutButtonForActiveRecord:(BOOL)active overtimeProgress:(CGFloat)overtimeProgress {
+    self.clockOutButton.enabled = active;
+    NSColor *titleColor = [NSColor.whiteColor colorWithAlphaComponent:active ? 0.96 : 0.42];
+    self.clockOutButton.attributedTitle = [[NSAttributedString alloc] initWithString:@"下班"
+        attributes:@{ NSFontAttributeName: [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold],
+                      NSForegroundColorAttributeName: titleColor }];
+    NSColor *fill = nil;
+    if (!active) {
+        fill = [NSColor.whiteColor colorWithAlphaComponent:0.10];
+        self.clockOutButton.toolTip = @"设置上班时间后可一键下班";
+    } else if (overtimeProgress > 0) {
+        fill = [NSColor.systemRedColor colorWithAlphaComponent:0.52 + 0.48 * overtimeProgress];
+        self.clockOutButton.toolTip = @"一键按当前时间记录下班（正在加班）";
+    } else {
+        fill = [NSColor.systemGreenColor colorWithAlphaComponent:0.84];
+        self.clockOutButton.toolTip = @"一键按当前时间记录下班";
+    }
+    self.clockOutButton.layer.backgroundColor = fill.CGColor;
+    self.clockOutButton.layer.borderColor = [NSColor.whiteColor colorWithAlphaComponent:active ? 0.28 : 0.13].CGColor;
 }
 
 - (NSScreen *)screenContainingPoint:(NSPoint)point {
@@ -448,6 +599,8 @@
         self.rangeLabel.textColor = [NSColor.whiteColor colorWithAlphaComponent:0.68];
         self.statusDot.layer.backgroundColor = NSColor.systemGreenColor.CGColor;
         self.progressView.hasRecord = NO;
+        self.progressView.progressIconVisible = NO;
+        [self updateClockOutButtonForActiveRecord:NO overtimeProgress:0];
         self.progressView.toolTip = @"设置上班时间后显示今日工时进度";
     } else {
         NSInteger start = [record[@"start"] integerValue];
@@ -481,6 +634,10 @@
         self.progressView.hasRecord = YES;
         self.progressView.regularProgress = MIN(1.0, elapsed / (CGFloat)standardDuration);
         self.progressView.overtimeProgress = MIN(1.0, overtime / 180.0);
+        self.progressView.progressIconVisible = !completed &&
+            self.settings.progressIconMode != WidgetProgressIconModeOff;
+        [self updateClockOutButtonForActiveRecord:!completed
+                                 overtimeProgress:self.progressView.overtimeProgress];
         self.progressView.toolTip = overtime > 0
             ? [NSString stringWithFormat:@"标准工时 %@ · 加班 %@", WorkFormatDuration(MIN(elapsed, standardDuration)), WorkFormatDuration(overtime)]
             : [NSString stringWithFormat:@"已工作 %@ / %@", WorkFormatDuration(elapsed), WorkFormatDuration(standardDuration)];
@@ -508,15 +665,16 @@
 - (void)showWidgetSettings {
     [NSApp activateIgnoringOtherApps:YES];
     self.pendingSettingsImage = self.settings.originalImage;
+    self.pendingSettingsIconData = self.settings.customProgressIconData;
     self.pendingRemoveBackground = NO;
 
-    NSView *accessory = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 460, 300)];
+    NSView *accessory = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 460, 395)];
     NSTextField *previewLabel = [NSTextField labelWithString:@"背景预览（拖动图片调整取景）"];
-    previewLabel.frame = NSMakeRect(20, 278, 300, 20);
+    previewLabel.frame = NSMakeRect(20, 373, 300, 20);
     previewLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
     [accessory addSubview:previewLabel];
 
-    self.settingsCropView = [[BackgroundCropView alloc] initWithFrame:NSMakeRect(20, 108, 420, 165)];
+    self.settingsCropView = [[BackgroundCropView alloc] initWithFrame:NSMakeRect(20, 203, 420, 165)];
     self.settingsCropView.image = self.pendingSettingsImage;
     self.settingsCropView.offsetX = self.settings.cropOffsetX;
     self.settingsCropView.offsetY = self.settings.cropOffsetY;
@@ -524,12 +682,12 @@
     [accessory addSubview:self.settingsCropView];
 
     NSButton *choose = [NSButton buttonWithTitle:@"选择图片…" target:self action:@selector(chooseSettingsBackground:)];
-    choose.frame = NSMakeRect(20, 74, 96, 26);
+    choose.frame = NSMakeRect(20, 169, 96, 26);
     choose.bezelStyle = NSBezelStyleRounded;
     [accessory addSubview:choose];
 
     self.settingsRemoveButton = [NSButton buttonWithTitle:@"移除图片" target:self action:@selector(removeSettingsBackground:)];
-    self.settingsRemoveButton.frame = NSMakeRect(120, 74, 86, 26);
+    self.settingsRemoveButton.frame = NSMakeRect(120, 169, 86, 26);
     self.settingsRemoveButton.bezelStyle = NSBezelStyleRounded;
     self.settingsRemoveButton.enabled = self.pendingSettingsImage != nil;
     [accessory addSubview:self.settingsRemoveButton];
@@ -537,22 +695,58 @@
     self.settingsModeControl = [NSSegmentedControl segmentedControlWithLabels:@[@"使用原图", @"模糊毛玻璃"]
                                                                  trackingMode:NSSegmentSwitchTrackingSelectOne
                                                                         target:nil action:nil];
-    self.settingsModeControl.frame = NSMakeRect(230, 74, 210, 26);
+    self.settingsModeControl.frame = NSMakeRect(230, 169, 210, 26);
     self.settingsModeControl.selectedSegment = self.settings.backgroundMode == WidgetBackgroundModeBlurredImage ? 1 : 0;
     self.settingsModeControl.enabled = self.pendingSettingsImage != nil;
     [accessory addSubview:self.settingsModeControl];
 
     NSTextField *zoomLabel = [NSTextField labelWithString:@"缩放"];
-    zoomLabel.frame = NSMakeRect(20, 41, 42, 20);
+    zoomLabel.frame = NSMakeRect(20, 136, 42, 20);
     self.settingsZoomSlider = [NSSlider sliderWithValue:self.settings.cropZoom minValue:1.0 maxValue:3.0
                                                  target:self action:@selector(settingsZoomChanged:)];
-    self.settingsZoomSlider.frame = NSMakeRect(66, 38, 374, 24);
+    self.settingsZoomSlider.frame = NSMakeRect(66, 133, 374, 24);
     self.settingsZoomSlider.enabled = self.pendingSettingsImage != nil;
     [accessory addSubview:zoomLabel]; [accessory addSubview:self.settingsZoomSlider];
 
+    NSBox *separator = [[NSBox alloc] initWithFrame:NSMakeRect(20, 113, 420, 1)];
+    separator.boxType = NSBoxSeparator;
+    [accessory addSubview:separator];
+
+    NSTextField *iconLabel = [NSTextField labelWithString:@"进度图标"];
+    iconLabel.frame = NSMakeRect(20, 80, 58, 20);
+    iconLabel.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    [accessory addSubview:iconLabel];
+
+    self.settingsIconModeControl = [NSSegmentedControl segmentedControlWithLabels:@[@"关闭", @"绿色小人", @"自定义"]
+                                                                     trackingMode:NSSegmentSwitchTrackingSelectOne
+                                                                            target:self
+                                                                            action:@selector(settingsIconModeChanged:)];
+    self.settingsIconModeControl.frame = NSMakeRect(82, 75, 218, 26);
+    self.settingsIconModeControl.selectedSegment = self.settings.progressIconMode;
+    [accessory addSubview:self.settingsIconModeControl];
+
+    self.settingsChooseIconButton = [NSButton buttonWithTitle:@"选择图片或动图…"
+                                                       target:self action:@selector(chooseSettingsProgressIcon:)];
+    self.settingsChooseIconButton.frame = NSMakeRect(308, 75, 132, 26);
+    self.settingsChooseIconButton.bezelStyle = NSBezelStyleRounded;
+    [accessory addSubview:self.settingsChooseIconButton];
+
+    NSTextField *iconHint = [NSTextField labelWithString:@"动态图支持 GIF；也可选择 APNG、WebP、PNG、JPEG。原文件会被完整保存。"];
+    iconHint.frame = NSMakeRect(20, 37, 382, 32);
+    iconHint.maximumNumberOfLines = 2;
+    iconHint.font = [NSFont systemFontOfSize:11];
+    iconHint.textColor = NSColor.secondaryLabelColor;
+    [accessory addSubview:iconHint];
+
+    self.settingsIconPreview = [[NSImageView alloc] initWithFrame:NSMakeRect(408, 31, 32, 32)];
+    self.settingsIconPreview.imageScaling = NSImageScaleProportionallyUpOrDown;
+    self.settingsIconPreview.animates = YES;
+    [accessory addSubview:self.settingsIconPreview];
+    [self updateSettingsIconControls];
+
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = @"更多小组件设置";
-    alert.informativeText = @"上传图片并调整小组件背景。";
+    alert.informativeText = @"调整背景与进度图标；进度图标默认关闭。";
     alert.accessoryView = accessory;
     [alert addButtonWithTitle:@"保存设置"];
     [alert addButtonWithTitle:@"取消"];
@@ -575,8 +769,22 @@
     } else if (self.pendingRemoveBackground) {
         [self.settings removeCustomImage];
     }
+
+    WidgetProgressIconMode selectedIconMode = self.settingsIconModeControl.selectedSegment;
+    if (selectedIconMode == WidgetProgressIconModeCustom) {
+        if (!self.pendingSettingsIconData ||
+            ![self.settings saveCustomProgressIconData:self.pendingSettingsIconData]) {
+            NSAlert *failure = [[NSAlert alloc] init];
+            failure.messageText = @"自定义图标还没有准备好";
+            failure.informativeText = @"请先选择一张图片或 GIF 动图，再保存设置。";
+            WorkRunGlassAlert(failure, self.widgetScreen);
+            return;
+        }
+    }
+    self.settings.progressIconMode = selectedIconMode;
     [self.settings synchronize];
     [self applyWidgetBackground];
+    [self applyProgressIcon];
     [self refreshDisplay];
     [self.historyController refresh];
     [self.panel orderFrontRegardless];
@@ -602,6 +810,54 @@
     self.settingsZoomSlider.enabled = YES;
     self.settingsModeControl.enabled = YES;
     self.settingsRemoveButton.enabled = YES;
+}
+
+- (void)updateSettingsIconControls {
+    WidgetProgressIconMode mode = self.settingsIconModeControl.selectedSegment;
+    self.settingsChooseIconButton.enabled = mode == WidgetProgressIconModeCustom;
+    if (mode == WidgetProgressIconModeBuiltIn) {
+        NSImage *image = [NSImage imageWithSystemSymbolName:@"figure.run"
+                                  accessibilityDescription:@"绿色小人"];
+        NSImageSymbolConfiguration *configuration =
+            [NSImageSymbolConfiguration configurationWithPointSize:20 weight:NSFontWeightSemibold];
+        self.settingsIconPreview.image = [image imageWithSymbolConfiguration:configuration];
+        self.settingsIconPreview.contentTintColor = NSColor.systemGreenColor;
+    } else if (mode == WidgetProgressIconModeCustom && self.pendingSettingsIconData) {
+        self.settingsIconPreview.image = [[NSImage alloc] initWithData:self.pendingSettingsIconData];
+        self.settingsIconPreview.contentTintColor = nil;
+    } else {
+        self.settingsIconPreview.image = nil;
+        self.settingsIconPreview.contentTintColor = nil;
+    }
+}
+
+- (void)settingsIconModeChanged:(NSSegmentedControl *)sender {
+    [self updateSettingsIconControls];
+}
+
+- (void)chooseSettingsProgressIcon:(id)sender {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.title = @"选择进度图片或动图";
+    panel.message = @"GIF 会保留动画；也支持 APNG、WebP、PNG、JPEG、HEIC 和 TIFF。";
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.allowedContentTypes = @[UTTypeGIF, UTTypePNG, UTTypeWebP, UTTypeJPEG, UTTypeHEIC, UTTypeTIFF];
+    WorkPrepareModalWindowForSmoothPresentation(panel, self.widgetScreen);
+    if ([panel runModal] != NSModalResponseOK) return;
+
+    NSData *data = [NSData dataWithContentsOfURL:panel.URL options:NSDataReadingMappedIfSafe error:nil];
+    if (data.length == 0 || data.length > 20 * 1024 * 1024 || ![[NSImage alloc] initWithData:data]) {
+        NSAlert *invalid = [[NSAlert alloc] init];
+        invalid.messageText = @"无法使用这个图标";
+        invalid.informativeText = data.length > 20 * 1024 * 1024
+            ? @"图标文件不能超过 20 MB，请压缩后再试。"
+            : @"请选择有效的图片或 GIF 动图。";
+        WorkRunGlassAlert(invalid, self.widgetScreen);
+        return;
+    }
+    self.pendingSettingsIconData = data;
+    self.settingsIconModeControl.selectedSegment = WidgetProgressIconModeCustom;
+    [self updateSettingsIconControls];
 }
 
 - (void)settingsZoomChanged:(NSSlider *)sender { self.settingsCropView.zoom = sender.doubleValue; }
@@ -797,6 +1053,34 @@
     NSString *key = self.store.relevantDateKey;
     NSDictionary *record = [self.store recordForDateKey:key];
     if (record) [self showClockOutEditorForDateKey:key record:record];
+}
+- (void)clockOutNow:(id)sender {
+    NSString *key = self.store.relevantDateKey;
+    NSDictionary *record = [self.store recordForDateKey:key];
+    if (!record || [record[@"completed"] boolValue]) {
+        [self refreshDisplay];
+        return;
+    }
+
+    NSInteger start = [record[@"start"] integerValue];
+    NSDate *baseDate = WorkDateFromKey(key);
+    NSDate *now = [NSDate date];
+    NSDate *todayStart = [NSCalendar.currentCalendar startOfDayForDate:now];
+    NSInteger dayOffset = [NSCalendar.currentCalendar components:NSCalendarUnitDay
+                                                        fromDate:baseDate toDate:todayStart options:0].day;
+    NSDateComponents *clock = [NSCalendar.currentCalendar components:(NSCalendarUnitHour | NSCalendarUnitMinute)
+                                                              fromDate:now];
+    NSInteger end = dayOffset * 24 * 60 + clock.hour * 60 + clock.minute;
+    NSInteger duration = end - start;
+    if (duration <= 0 || duration > 24 * 60) {
+        // Keep the existing detailed recovery UI for invalid or stale shifts.
+        [self showClockOutEditorForDateKey:key record:record];
+        return;
+    }
+
+    [self.store completeRecordForDateKey:key endMinutes:end];
+    [self refreshDisplay];
+    [self.historyController refresh];
 }
 - (void)deleteToday:(id)sender {
     NSAlert *confirm = [[NSAlert alloc] init];
