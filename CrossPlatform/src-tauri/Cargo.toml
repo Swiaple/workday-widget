@@ -1,6 +1,6 @@
 [package]
 name = "workday-widget"
-version = "4.0.0-beta.1"
+version = "4.0.0-beta.2"
 description = "A compact cross-platform workday widget"
 authors = ["Swiaple"]
 edition = "2021"

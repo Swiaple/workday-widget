@@ -98,11 +98,6 @@ fn read_legacy_state(app: &AppHandle) -> Result<Option<Value>, String> {
     })))
 }
 
-#[cfg(not(target_os = "macos"))]
-fn legacy_state_path(_app: &AppHandle) -> Option<PathBuf> {
-    None
-}
-
 #[tauri::command]
 fn load_app_state(app: AppHandle) -> Result<Option<Value>, String> {
     let current = state_path(&app)?;
