@@ -1,4 +1,12 @@
 .DS_Store
+CrossPlatform/node_modules/
+CrossPlatform/dist/
+CrossPlatform/src-tauri/target/
+CrossPlatform/src-tauri/gen/
+CrossPlatform/src-tauri/icons/android/
+CrossPlatform/src-tauri/icons/ios/
+CrossPlatform/.keys/
+.tooling/
 .build-cache/
 build/
 *.xcuserstate

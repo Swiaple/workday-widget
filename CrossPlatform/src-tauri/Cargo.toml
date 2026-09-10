@@ -1,0 +1,30 @@
+[package]
+name = "workday-widget"
+version = "4.0.0-beta.1"
+description = "A compact cross-platform workday widget"
+authors = ["Swiaple"]
+edition = "2021"
+
+[lib]
+name = "workday_widget_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+plist = "1"
+tauri = { version = "2", features = ["macos-private-api"] }
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+window-vibrancy = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_UI_WindowsAndMessaging"
+] }

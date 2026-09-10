@@ -1,12 +1,23 @@
 # 打卡时间（Workday Widget）
 
-一款轻量的原生 macOS 桌面工时小组件。设置当天的上班时间后，它会根据用户保存的标准工时计算预计下班时间，并持续显示当日进度、加班状态和历史记录。
+一款轻量的桌面工时小组件。设置当天的上班时间后，它会根据用户保存的标准工时计算预计下班时间，并持续显示当日进度、加班状态和历史记录。
 
-- **当前版本：3.5（Build 12）**
-- **最低系统：macOS 13.0**
+- **当前稳定版：3.5（Build 12，仅 macOS）**
+- **跨平台版：4.0.0-beta.1（macOS / Windows 11，开发中）**
+- **最低系统：macOS 13.0 / Windows 11**
 - **开源协议：MIT**
 
-项目使用 Objective-C 与 AppKit 编写，不依赖第三方框架，也不需要 Xcode 工程文件。
+稳定版使用 Objective-C 与 AppKit 编写。`CrossPlatform` 目录是共享同一套界面、业务逻辑和数据格式的 Tauri 2 跨平台版；它会逐步接替稳定版，并提供面向普通用户的安装包和应用内更新。
+
+## 普通用户安装与更新
+
+发布 4.0 后，用户不需要 GitHub 指令，也不需要安装开发工具：
+
+1. 打开项目的 [Releases 页面](https://github.com/Swiaple/workday-widget/releases/latest)。
+2. macOS 下载 DMG，Windows 11 下载名称含 Setup 的 EXE。
+3. 只需手动安装一次。以后应用启动时会静默检查更新；有新版本时，小组件会显示“更新”，在“更多小组件设置”中可直接下载、安装并重新启动。
+
+更新包使用独立签名验证，应用只会安装由项目维护者发布的更新。工时记录、背景图片和用户设置仍只保存在本机，不会上传到 GitHub。
 
 ## 功能
 
@@ -58,6 +69,18 @@ open "build/打卡时间.app"
 
 构建脚本会使用本机工具链编译应用，并进行本机临时签名；它不是用于公开分发的 Developer ID 签名或公证版本。
 
+### 构建跨平台版
+
+`CrossPlatform` 需要 Node.js、Rust 和相应平台的系统构建工具。进入目录后执行：
+
+```bash
+npm ci
+npm test
+npm run tauri build
+```
+
+不必在 macOS 上交叉生成 Windows 安装包。推送 `app-v*` 版本标签后，仓库内的 GitHub Actions 会分别在 macOS 和 Windows 构建机上测试、打包并发布两套安装包，同时生成应用内更新所需的 `latest.json`。
+
 ## 安装与开机启动
 
 应用无需 DMG。可以把构建后的 `打卡时间.app` 拖入当前用户的 `~/Applications`，或系统的 `/Applications` 文件夹。
@@ -99,6 +122,14 @@ Resources/local.codex.workday-widget.plist
 workday-widget/
 ├── LICENSE
 ├── README.md
+├── .github/workflows/
+│   ├── cross-platform-check.yml
+│   └── release.yml
+├── CrossPlatform/
+│   ├── src/
+│   ├── src-tauri/
+│   ├── package.json
+│   └── app-icon.svg
 ├── Resources/
 │   ├── Info.plist
 │   └── local.codex.workday-widget.plist
@@ -157,16 +188,24 @@ build/
 .DS_Store
 ```
 
-接收者解压后运行 `zsh scripts/build.sh` 即可在自己的电脑上重新构建和修改。若通过 Git 分享，项目内的 `.gitignore` 已排除这些本地文件。
+接收者可继续修改原生 3.5 版，也可以进入 `CrossPlatform` 开发 macOS / Windows 11 共用的 4.x 版。若通过 Git 分享，项目内的 `.gitignore` 已排除依赖、构建产物、本机工具链和私有更新签名。
 
 ## 版本号
 
-应用版本的唯一来源是 `Resources/Info.plist`：
+原生 3.5 版的版本来源是 `Resources/Info.plist`：
 
 - `CFBundleShortVersionString`：对用户显示的版本号，当前为 `3.5`。
 - `CFBundleVersion`：内部构建号，当前为 `12`。
 
 发布新版本时，请同步更新本节顶部显示的版本信息。
+
+跨平台 4.x 版发布前需要同步更新：
+
+- `CrossPlatform/package.json`
+- `CrossPlatform/src-tauri/Cargo.toml`
+- `CrossPlatform/src-tauri/tauri.conf.json`
+
+随后推送同版本标签，例如 `app-v4.0.0`。更新私钥只保存在维护者的安全备份和 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY` 中，绝不能提交到仓库；公钥可以安全地保存在应用配置中。
 
 ## 许可证
 

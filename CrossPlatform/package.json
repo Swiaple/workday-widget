@@ -1,0 +1,25 @@
+{
+  "name": "workday-widget-cross-platform",
+  "private": true,
+  "version": "4.0.0-beta.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:web": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-process": "2.3.1",
+    "@tauri-apps/plugin-updater": "2.11.0",
+    "@tauri-apps/plugin-window-state": "2.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@tauri-apps/cli": "2.11.4",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "5.0.0"
+  }
+}

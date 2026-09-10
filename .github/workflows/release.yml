@@ -1,0 +1,67 @@
+name: Build macOS and Windows installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "app-v*"
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: CrossPlatform/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: CrossPlatform/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: CrossPlatform
+        run: npm ci
+
+      - name: Run shared-logic tests
+        working-directory: CrossPlatform
+        run: npm test
+
+      - name: Build installers and publish the release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        with:
+          projectPath: CrossPlatform
+          tagName: app-v__VERSION__
+          releaseName: 打卡时间 v__VERSION__
+          releaseBody: |
+            面向普通用户的安装包：macOS 请下载 DMG，Windows 11 请下载 Setup EXE。
+            安装本版本后，后续更新可直接在小组件内一键完成。
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

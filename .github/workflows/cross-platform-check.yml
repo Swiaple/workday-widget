@@ -1,0 +1,50 @@
+name: Check cross-platform app
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths:
+      - "CrossPlatform/**"
+      - ".github/workflows/**"
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - macos-latest
+          - windows-latest
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: CrossPlatform/package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: CrossPlatform/src-tauri -> target
+
+      - name: Install frontend dependencies
+        working-directory: CrossPlatform
+        run: npm ci
+
+      - name: Run shared-logic tests
+        working-directory: CrossPlatform
+        run: npm test
+
+      - name: Compile the native app
+        working-directory: CrossPlatform
+        run: npm run tauri build -- --debug --no-bundle
